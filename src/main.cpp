@@ -41,7 +41,7 @@ static uint32_t lv_tick_cb(void) { return millis(); }
 static void vl_w8(uint16_t reg, uint8_t v) {
     Wire.beginTransmission(VL_ADDR);
     Wire.write((uint8_t)(reg >> 8));
-    Wire.write((uint8_t)(reg & 0xFF));
+    Wire.write((uint8_t)(reg & 0xff));
     Wire.write(v);
     Wire.endTransmission();
 }
@@ -49,9 +49,9 @@ static void vl_w8(uint16_t reg, uint8_t v) {
 static uint8_t vl_r8(uint16_t reg) {
     Wire.beginTransmission(VL_ADDR);
     Wire.write((uint8_t)(reg >> 8));
-    Wire.write((uint8_t)(reg & 0xFF));
-    if (Wire.endTransmission(false) != 0) return 0xFF;   // repeated start
-    if (Wire.requestFrom((uint8_t)VL_ADDR, (uint8_t)1) != 1) return 0xFF;
+    Wire.write((uint8_t)(reg & 0xff));
+    Wire.requestFrom((uint8_t)VL_ADDR, (uint8_t)1);
+    
     return Wire.read();
 }
 
@@ -92,8 +92,13 @@ static uint8_t vl_range_mm(void) {
         if (millis() - t0 > 50) return 255;
     }
     uint8_t mm = vl_r8(0x0062);                   // RESULT__RANGE_VAL
-    vl_w8(0x0015, 0x07);                          // clear interrupts
+    vl_w8(0x0015, 0x07);                    // clear interrupts
+    t0 = millis();      
     return mm;
+}
+
+static uint8_t errorMessage(){
+    return (vl_r8(0x04D) >> 4);
 }
 
 // ---------- MPU6050 ----------
@@ -119,7 +124,10 @@ void setup() {
     // VL6180X: drive CE high immediately. Datasheet §2.3: chip needs ≤ 1.4 ms after CE
     // rising edge to reach software-standby. We give it well more than that below.
     pinMode(PIN_SHUT, OUTPUT);
-    digitalWrite(PIN_SHUT, HIGH);
+    digitalWrite(PIN_SHUT, LOW);
+    delay(10);
+    digitalWrite(PIN_SHUT , HIGH);
+    delay(10);
 
     // Display first so we can show status.
     tft.init();
@@ -136,6 +144,7 @@ void setup() {
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     ui_init();
 
+    delay(10);
     // Grab EEZ widgets (child order on screen `main`: hello-label, image, text-label).
     img_w = lv_obj_get_child(objects.main, 1);
     lbl_w = lv_obj_get_child(objects.main, 2);
@@ -154,9 +163,17 @@ void setup() {
     }
     Serial.printf("MPU6050: %s\n", mpu_ok ? "OK" : "FAIL");
 
+    delay(5);
+
     // VL6180X — probe, then init if present.
     Wire.beginTransmission(VL_ADDR);
     vl_ok = (Wire.endTransmission() == 0);
+    for (byte address = 1; address < 127; address++){
+        Wire.beginTransmission(address);
+        if(Wire.endTransmission() == 0){
+            Serial.print(address);
+        }
+    }
     if (vl_ok) {
         vl_init();
         Serial.println("VL6180X: OK");
@@ -191,6 +208,8 @@ void loop() {
         char buf[16];
         if (!vl_ok) {
             snprintf(buf, sizeof(buf), "no dev");
+            // Serial.printf("error: \n", errorMessage);
+            Serial.println(VL_ADDR);
         } else {
             uint8_t mm = vl_range_mm();
             if (mm == 255) snprintf(buf, sizeof(buf), "--");
